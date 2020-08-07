@@ -6,6 +6,8 @@
          quil                           {:mvn/version "3.1.0"}
          zprint                         {:mvn/version "1.0.0"}
 
+         org.clojure/core.memoize       {:mvn/version "1.0.236"}
+
          dev.freeformsoftware/metacomet {:git/url "https://github.com/JJ-Atkinson/metacomet.git"
                                          :sha     "2cd5cac2d6460d7c86785a2ff4365236c5f1ac40"}}
 

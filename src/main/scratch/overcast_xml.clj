@@ -17,10 +17,11 @@
 ;; clojure.xml creates structs, which cannot be dissoced. Causes issues for meander.
 
 (def subscriptions-xml
-  (-> "/home/jarrett/Downloads/overcast.opml"
+  #_(-> "/home/jarrett/Downloads/overcast.opml"
     io/as-file
     parse
-    walk-struct->map))
+    walk-struct->map)
+  nil)
 
 
 (defn gather-remote-xml [url]

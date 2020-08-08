@@ -30,3 +30,5 @@
   to recompile, and then use `start` once things are good."
   []
   (tools-ns/refresh))
+
+(comment (restart))

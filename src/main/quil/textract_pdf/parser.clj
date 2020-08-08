@@ -18,9 +18,10 @@
 (defn next-p! [] (swap! page inc))
 (defn prev-p! [] (swap! page dec))
 (comment (next-p!) (prev-p!))
-(def size-multiplier (atom 1900))
+(def size-multiplier (atom 1050))
 (defonce selected-id (atom nil))
 (def conj-set (fnil conj #{}))
+(def std-line-height 0.015)
 
 (defn highlight-id! [id] (swap! highlighted-ids set/union (set (cond-> id (string? id) vector))))
 (defn unhighlight-id! [id] (swap! highlighted-ids disj id))
@@ -41,7 +42,7 @@
 (do
   (defn setup [& args]
     (q/frame-rate 4)
-    (q/text-font (q/create-font "Ubuntu" 16)))
+    (q/text-font (q/create-font "Ubuntu" 12)))
   (reset! ra/sketch-setup setup))
 
 
@@ -72,7 +73,8 @@
 
 (def ^:dynamic *all-words* (->>
                              ;"/home/jarrett/Downloads/blocks.edn"
-                             "/home/jarrett/code-projects/jra-aws/NewSite/cool-blocks.edn"
+                             ;"/home/jarrett/code-projects/jra-aws/NewSite/cool-blocks.edn"
+                             "/home/jarrett/Downloads/cool-blocks.edn"
                              slurp read-string (map integrate-bounding-box)))
 (def ^:dynamic *element-by-id* (into {} (map (fn [x] [(:Id x) x]) *all-words*)))
 
@@ -83,12 +85,12 @@
 
 
 (def words-on-page
-  (memoize (fn [page-num]
-             (m/search *all-words*
-               (m/scan {:BlockType "WORD"
-                        :Page      ~page-num
-                        :as        ?q})
-               ?q))))
+  (fn [page-num]
+    (m/search *all-words*
+      (m/scan {:BlockType "WORD"
+               :Page      ~page-num
+               :as        ?q})
+      ?q)))
 
 
 (defn same?
@@ -124,21 +126,68 @@
 (def left? above?)
 (def behind? above?)
 
-(defn on-line [page line-y]
-  (m/search (words-on-page page)
-    (m/scan {:Id  ?id
-             :Top (m/pred (close? line-y))})
-    ?id))
+(defn on-line
+  ([page line-y]
+   (on-line page line-y 0.002))
+  ([page line-y tolerance]
+   (m/search (words-on-page page)
+     (m/scan {:Id  ?id
+              :Top (m/pred (close? line-y tolerance))})
+     ?id)))
 
+(defn on-n-lines [page start-y num-lines]
+  (m/search (words-on-page page)
+    (m/scan {:Id ?id
+             :Top (m/and 
+                    (m/pred (below? start-y)) 
+                    (m/pred (above? (+ start-y (* std-line-height num-lines)))))})
+    ?id))
 
 (comment :highlight-all-on-selected-line
   (clear-highlights!)
-  (->> @selected-id
-    *element-by-id*
-    :Top
-    (on-line @page)
+  (->
+    (on-line @page
+      (->> @selected-id
+        *element-by-id*
+        :Top)
+      0.004)
+    highlight-id!)
+  (->
+    (on-n-lines @page
+      (->> @selected-id
+        *element-by-id*
+        :Top)
+      2)
     highlight-id!))
 
+(defn photo-line-headers []
+  (m/search *all-words*
+    (m/scan {:Id ?id
+             :Left (m/pred (behind? 0.03))
+             :Text (m/re #"Phot.*")})
+    ?id))
+
+
+(defn photo-number-legal-lines []
+  (let [header-ids (photo-line-headers)
+        headers (map #(get *element-by-id* %) header-ids)]
+    (mapcat #(on-n-lines (:Page %) (:Top %) 2) headers)))
+
+(comment :highlight-photo-groups
+  (clear-highlights!)
+  (->
+    (photo-line-headers)
+    highlight-id!)
+  (->
+    (photo-number-legal-lines)
+    highlight-id!))
+
+(defn remove-garbage [cb]
+  (let [garbage-ids (photo-number-legal-lines)
+        garbage-ids-set (set garbage-ids)]
+    (binding [*all-words* (remove #(contains? garbage-ids-set (:Id %)) *all-words*)
+              *element-by-id* (apply dissoc *element-by-id* garbage-ids)]
+      (cb))))
 
 (defn farm-headings
   "Grabs all instances of \"Farm\" on the left of the page"
@@ -448,12 +497,14 @@
 
 
 (comment
+  (clear-highlights!)
   ;; parse the whole doc
   (mapcat identity (parse-document))
 
   ;; highlight tables
-  (doall (map (fn [hid] (->> hid *element-by-id* tag-table (map :Id) highlight-id!))
-           (farm-headings pdf-read)))
+  (remove-garbage 
+    #(doall (map (fn [hid] (->> hid *element-by-id* tag-table (map :Id) highlight-id!))
+             (farm-headings *all-words*))))
 
   (spit "final-csv.csv"
     (str (str/join "\t" field-order) "\n"
@@ -508,18 +559,21 @@
 
 
 (do (defn draw [& args]
-      (q/text-align :left :top)
-      (q/background 0)
-      (let [words (words-on-page @page)
-            [dist block] (nearest-mouse words)]
-        (doall (map draw-word words))
-        (q/text (str "Dist: " dist) (- (q/width) 120) 20)
-        (q/text (str "FPS: " (q/current-frame-rate)) (- (q/width) 120) 40)
-        (q/text (zp/zprint-str block 70) (- (q/width) 750) 20)
-        (when (q/mouse-pressed?)
-          (reset! selected-id (:Id block))
-          (q/background 255))
-        (draw-word (assoc block :custom-fill (q/color 128 255 128)))))
+      (remove-garbage
+        #(do
+
+           (q/text-align :left :top)
+           (q/background 0)
+           (let [words (words-on-page @page)
+                 [dist block] (nearest-mouse words)]
+             (doall (map draw-word words))
+             (q/text (str "Dist: " dist) (- (q/width) 120) 20)
+             (q/text (str "FPS: " (q/current-frame-rate)) (- (q/width) 120) 40)
+             (q/text (zp/zprint-str block 70) (- (q/width) 550) 20)
+             (when (q/mouse-pressed?)
+               (reset! selected-id (:Id block))
+               (q/background 255))
+             (draw-word (assoc block :custom-fill (q/color 128 255 128)))))))
     (reset! ra/sketch-draw draw))
 
 

@@ -32,9 +32,9 @@
 (defn to-file [] (spit "scratch.edn" @rss-feed-cache))
 (defn from-file [] (reset! rss-feed-cache (read-string (slurp "scratch.edn"))) nil)
 
-(comment 
+(comment
   (count @rss-feed-cache)
-  (-> (get @rss-feed-cache "The Joe Rogan Experience") :content (get 0) :content  ))
+  (-> (get @rss-feed-cache "The Joe Rogan Experience") :content (get 0) :content))
 
 
 (def subscriptions-w-urls
@@ -57,7 +57,7 @@
           :content (m/scan {:tag   :outline
                             :attrs {:progress (m/some ?progress)
                                     :title    (m/some ?title)}})})
-    {:type :in-progress :rss ?rss-feed :progress ?progress :title ?title :feed-title ?feed-title}
+    {:type :in-progress :rss ?rss-feed :progress (Integer/parseInt ?progress) :title ?title :feed-title ?feed-title}
 
     (m/$ {:attrs   {:xmlUrl (m/some ?rss-feed)
                     :title  ?feed-title}
@@ -67,6 +67,19 @@
     {:type :played :rss ?rss-feed :title ?title :feed-title ?feed-title}))
 
 
+(def ep->len (into {} (m/search (-> @rss-feed-cache)
+                        (m/$ (m/and
+                               (m/scan {:tag :title :content [(m/some ?title)]})
+                               (m/scan {:tag :enclosure :attrs {:length (m/some ?length)}})))
+                        [?title (Integer/parseInt ?length)])))
+
+
+(def marked-episodes (map
+                       (fn [ep]
+                         (if (= (:type ep) :in-progress)
+                           ep
+                           (assoc ep :progress (ep->len (:title ep)))))
+                       episodes))
 
 
 
@@ -109,7 +122,38 @@
 
 
   (m/search (-> @rss-feed-cache (get "The Joe Rogan Experience"))
-    (m/$ (m/and 
+    (m/$ (m/and
            (m/scan {:tag :title :content ["#1503 - Josh Barnett"]})
            (m/scan {:tag :enclosure :attrs {:length (m/some ?length)}})))
-    (Integer/parseInt ?length)))
+    (Integer/parseInt ?length))
+
+  (m/search rss-feed-cache
+    (m/$ (m/and
+           (m/scan {:tag :title :content [(m/some ?title)]})
+           (m/scan {:tag :enclosure :attrs {:length (m/some ?length)}})))
+    [?title (Integer/parseInt ?length)])
+
+  (def ep->len (into {} (m/search (-> @rss-feed-cache)
+                          (m/$ (m/and
+                                 (m/scan {:tag :title :content [(m/some ?title)]})
+                                 (m/scan {:tag :enclosure :attrs {:length (m/some ?length)}})))
+                          [?title (Integer/parseInt ?length)])))
+  (count ep->len)
+  (double (/ (reduce + (vals ep->len)) (* 1000 60 60 60))))
+
+
+(m/search [{:a :whatever :b [{:n 1} {:n 2} {:n 1}]}
+           {:a :goes :b [{:n 1} {:n 2} {:n 4}]}
+           {:a :here :b [{:n 2} {:n 2} {:n 3}]}]
+  (m/scan {:a ?a :b (m/gather {:n !n})})
+  {:a ?a :n !n})
+
+(m/search [{:a :whatever :b [{:n 1} {:n 2} {:n 1}]}
+           {:a :goes :b [{:n 1} {:n 2} {:n 4}]}
+           {:a :here :b [{:n 2} {:n 2} {:n 3}]}]
+  (m/scan {:a ?a :b [{:n !n} ...]})
+  {:a ?a :n !n})
+
+;=> ({:a :whatever, :n [1 2 1]}
+;    {:a :goes, :n [1 2 4]}
+;    {:a :here, :n [2 2 3]})

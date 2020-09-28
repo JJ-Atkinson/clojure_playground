@@ -73,8 +73,8 @@
 
 (def ^:dynamic *all-words* (->>
                              ;"/home/jarrett/Downloads/blocks.edn"
-                             ;"/home/jarrett/code-projects/jra-aws/NewSite/cool-blocks.edn"
-                             "/home/jarrett/Downloads/cool-blocks.edn"
+                             "/home/jarrett/code-projects/jra-aws/NewSite/cool-blocks.edn"
+                             ;"/home/jarrett/Downloads/cool-blocks.edn"
                              slurp read-string (map integrate-bounding-box)))
 (def ^:dynamic *element-by-id* (into {} (map (fn [x] [(:Id x) x]) *all-words*)))
 
@@ -85,16 +85,16 @@
 
 
 (def words-on-page
-  (fn [page-num]
-    (m/search *all-words*
-      (m/scan {:BlockType "WORD"
-               :Page      ~page-num
-               :as        ?q})
-      ?q)))
+  (memoize (fn [page-num]
+             (m/search *all-words*
+               (m/scan {:BlockType "WORD"
+                        :Page      ~page-num
+                        :as        ?q})
+               ?q))))
 
 
 (defn same?
-  ([a b] (same? a b 0.002))
+  ([a b] (same? a b 0.003))
   ([a b tolerance]
    (if (and a b)
      (< (Math/abs (- a b)) tolerance)
@@ -105,19 +105,19 @@
   ([e1 e2 tolerance] (same? (:Top e1) (:Top e2) tolerance)))
 
 (defn close?
-  ([origin] (close? origin 0.002))
+  ([origin] (close? origin 0.003))
   ([origin tolerance]
    (fn [n] (same? n origin tolerance))))
 
 (defn below?
-  ([origin] (below? origin 0.002))
+  ([origin] (below? origin 0.003))
   ([origin tolerance]
    (fn [n] (if (and origin tolerance n)
              (< (- origin tolerance) n)
              false))))
 
 (defn above?
-  ([origin] (above? origin 0.002))
+  ([origin] (above? origin 0.003))
   ([origin tolerance]
    (fn [n] (> (+ origin tolerance) n))))
 
@@ -127,8 +127,9 @@
 (def behind? above?)
 
 (defn on-line
+
   ([page line-y]
-   (on-line page line-y 0.002))
+   (on-line page line-y 0.003))
   ([page line-y tolerance]
    (m/search (words-on-page page)
      (m/scan {:Id  ?id
@@ -136,11 +137,12 @@
      ?id)))
 
 (defn on-n-lines [page start-y num-lines]
-  (m/search (words-on-page page)
-    (m/scan {:Id ?id
-             :Top (m/and 
-                    (m/pred (below? start-y)) 
-                    (m/pred (above? (+ start-y (* std-line-height num-lines)))))})
+  (m/search *all-words*
+    (m/scan {:Id   ?id
+             :Page ~page
+             :Top  (m/and
+                     (m/pred (below? start-y))
+                     (m/pred (above? (+ start-y (* std-line-height num-lines)))))})
     ?id))
 
 (comment :highlight-all-on-selected-line
@@ -162,7 +164,7 @@
 
 (defn photo-line-headers []
   (m/search *all-words*
-    (m/scan {:Id ?id
+    (m/scan {:Id   ?id
              :Left (m/pred (behind? 0.03))
              :Text (m/re #"Phot.*")})
     ?id))
@@ -225,15 +227,15 @@
                            #"Far.*" :farm
                            #"Tract" :tract
                            #"CLU.*" :clu-field
-                           #"Irrigation.*" :irrigation-practice
+                           #"Irr[i\.](?:gation)?.*" :irrigation-practice
                            #"Crop/" :crop-commodity
                            #"Var.*" :var-type
                            #"Int.*" :int-use
                            #"Act.*" :act-use
                            #"Org.*" :org.-status
-                           #"Native.*" :native-sod
+                           #"Nat[t\.](?:ive)?.*" :native-sod
                            #"C.C.*" :cc-status
-                           #"Rpt.*" :rpt-unit
+                           #"Rpt.*" :rpt
                            #"Reported.*" :reported-quantity
                            #"Determined.*" :determined-quantity
                            #"Crop" :crop-land
@@ -242,6 +244,8 @@
                            #"Producer.*" :producer
                            #"FSA.*" :fsa-physical-location
                            #"NAP.*" :nap-unit
+                           #"P\/P.*" :planting-period
+                           #"Sig.*" :signature-date ;; ignored 
                            #".*" nil)]
                  [tag (assoc (get *element-by-id* hid)
                         :tag tag)]))
@@ -255,20 +259,32 @@
         planting (m/search initial-tag
                    (m/scan [:planting ?p])
                    ?p)
-        mapped (dissoc (into {} initial-tag) :producer :planting nil)
+        rpt (m/search initial-tag
+              (m/scan [:rpt ?p])
+              ?p)
+        mapped (dissoc (into {} initial-tag) :producer :planting :rpt nil)
         [producer-share producer-name] (sort-by :Left producer)
-        [planting-date planting-period] (sort-by :Left planting)]
+        [planting-date planting-period] (sort-by :Left planting)
+        [rpt-unit reported-quantity] (sort-by :Left rpt)]
     (assoc mapped
       :producer-share (assoc producer-share :tag :producer-share)
       :producer-name (assoc producer-name :tag :producer-name)
       :planting-date (assoc planting-date :tag :planting-date)
-      :planting-period (assoc planting-period :tag :planting-period))))
+      :planting-period (or
+                         (:planting-period mapped)
+                         (assoc planting-period :tag :planting-period))
+      :rpt-unit (assoc rpt-unit :tag :rpt-unit)
+      :reported-quantity (or
+                           (:reported-quantity mapped)
+                           (assoc reported-quantity
+                             :tag :reported-quantity
+                             :Left (+ 0.008 (:Left rpt-unit)))))))
 
 (comment :grabbing-left-bounds
-  (->> pdf-read
+  (->> *all-words*
     farm-headings
-    first by-id
-    collect-headings
+    first *element-by-id*
+    collect-heading->s
     collect-left-bounds
     (mc/map-vals :Left)
     seq
@@ -502,14 +518,16 @@
   (mapcat identity (parse-document))
 
   ;; highlight tables
-  (remove-garbage 
+  (remove-garbage
     #(doall (map (fn [hid] (->> hid *element-by-id* tag-table (map :Id) highlight-id!))
-             (farm-headings *all-words*))))
+              (farm-headings *all-words*))))
 
-  (spit "final-csv.csv"
-    (str (str/join "\t" field-order) "\n"
-      (str/join "\n" (map (fn [row] (str/join "\t" (map (comp #(str/replace % "\n" " ") str row) field-order)))
-                       (mapcat identity (parse-document)))))))
+  (time
+    (remove-garbage
+      (fn [] (spit "final-csv.csv"
+               (str (str/join "\t" field-order) "\n"
+                 (str/join "\n" (map (fn [row] (str/join "\t" (map (comp #(str/replace % "\n" " ") str row) field-order)))
+                                  (mapcat identity (parse-document))))))))))
 
 
 
@@ -577,6 +595,16 @@
     (reset! ra/sketch-draw draw))
 
 
+(defn remove-garbage-once_DEV! []
+  (let [garbage-ids (photo-number-legal-lines)
+        garbage-ids-set (set garbage-ids)]
+    (let [aw (remove #(contains? garbage-ids-set (:Id %)) *all-words*)
+          eid (apply dissoc *element-by-id* garbage-ids)]
+      (def ^:dynamic *all-words* aw)
+      (def ^:dynamic *element-by-id* eid))))
+
+(comment (remove-garbage-once_DEV!))
+
 
 
 
@@ -594,6 +622,8 @@
   (ra/mount-app! application))
 
 
-(comment (mount-sketch)
+(comment
+  (mount-sketch)
+  (ra/quit-app!)
 
   (q/available-fonts))

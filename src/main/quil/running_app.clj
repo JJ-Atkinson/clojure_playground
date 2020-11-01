@@ -10,6 +10,10 @@
 
 (defonce sketch-setup (atom nil))
 
+(defonce sketch-step (atom nil))
+
+(defonce sketch-keydown (atom nil))
+
 (defn quit-app! []
   (when @sketch-atom
     (.exit @sketch-atom)))

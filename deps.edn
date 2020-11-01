@@ -3,10 +3,16 @@
  :deps  {com.fulcrologic/guardrails     {:mvn/version "0.0.12"}
          medley                         {:mvn/version "1.3.0"}
          meander/epsilon                {:mvn/version "0.0.512"}
-         quil                           {:mvn/version "3.1.0"}
+         ;quil                           {:mvn/version "2.2.6"} ;; when using box2d
+         quil                           {:mvn/version "2.7.1"
+                                         :exclusions  [com.lowagie/itext]}
+         ;quil                           {:mvn/version "3.1.6"} ;; all other times
          zprint                         {:mvn/version "1.0.0"}
 
          org.clojure/core.memoize       {:mvn/version "1.0.236"}
+         org.nfrac/cljbox2d             {:mvn/version "0.5.0"}
+
+         org.nfrac/cljbox2d.testbed     {:mvn/version "0.5.0"}
 
          dev.freeformsoftware/metacomet {:git/url "https://github.com/JJ-Atkinson/metacomet.git"
                                          :sha     "b1212c92a515660ffb3ba5bc5bb1095895e874e0"}}
